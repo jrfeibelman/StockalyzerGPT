@@ -27,8 +27,8 @@ from peft import (
 )
 
 # Replace with your own api_key and project name
-os.environ['WANDB_API_KEY'] = 'ecf1e5e4f47441d46822d38a3249d62e8fc94db4'
-os.environ['WANDB_PROJECT'] = 'fingpt-forecaster'
+# os.environ['WANDB_API_KEY'] = 'ecf1e5e4f47441d46822d38a3249d62e8fc94db4'
+# os.environ['WANDB_PROJECT'] = 'fingpt-forecaster'
 
 
 class GenerationEvalCallback(TrainerCallback):
@@ -36,7 +36,8 @@ class GenerationEvalCallback(TrainerCallback):
     def __init__(self, eval_dataset, ignore_until_epoch=0):
         self.eval_dataset = eval_dataset
         self.ignore_until_epoch = ignore_until_epoch
-    
+        self.mps_enabled = torch.backends.mps.is_available()
+
     def on_evaluate(self, args, state: TrainerState, control: TrainerControl, **kwargs):
         
         if state.epoch is None or state.epoch + 1 < self.ignore_until_epoch:
@@ -76,11 +77,14 @@ class GenerationEvalCallback(TrainerCallback):
                 wandb.init()
                 
             wandb.log(metrics, step=state.global_step)
-            torch.cuda.empty_cache()            
+            if self.mps_enabled:
+                torch.mps.empty_cache()
+            else:
+                torch.cuda.empty_cache()            
 
 
 def main(args):
-        
+    mps_enabled = torch.backends.mps.is_available()
     model_name = parse_model_name(args.base_model, args.from_remote)
     
     # load model
@@ -122,7 +126,7 @@ def main(args):
     formatted_time = current_time.strftime('%Y%m%d%H%M')
     
     training_args = TrainingArguments(
-        output_dir=f'finetuned_models/{args.run_name}_{formatted_time}', # 保存位置
+        output_dir=f'finetuned_models/{args.run_name}_{formatted_time}',
         logging_steps=args.log_interval,
         num_train_epochs=args.num_epochs,
         per_device_train_batch_size=args.batch_size,
@@ -185,7 +189,10 @@ def main(args):
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
     
-    torch.cuda.empty_cache()
+    if mps_enabled:
+        torch.mps.empty_cache()
+    else:
+        torch.cuda.empty_cache()
     trainer.train()
 
     # save model
